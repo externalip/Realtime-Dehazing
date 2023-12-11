@@ -9,6 +9,54 @@ from PyQt5.QtCore import pyqtSignal, QThread, QObject
 import logging
 
 
+class VideoGet:
+    """
+    Class that continuously gets frames from a VideoCapture object
+    with a dedicated thread.
+    """
+
+    def __init__(self, url=0):
+        self.stream = cv2.VideoCapture(url)
+        (self.grabbed, self.frame) = self.stream.read()
+        self.stopped = False
+
+    def start(self):
+        Thread(target=self.get, args=()).start()
+        return self
+
+    def get(self):
+        while not self.stopped:
+            if not self.grabbed:
+                self.stop()
+            else:
+                (self.grabbed, self.frame) = self.stream.read()
+
+    def stop(self):
+        self.stopped = True
+
+
+class VideoEmitted(QObject):
+    frame_processed = pyqtSignal(QImage)
+    """
+    Class that continuously shows a frame using a dedicated thread.
+    """
+
+    def __init__(self, frame=None):
+        self.frame = frame
+        self.stopped = False
+
+    def start(self):
+        Thread(target=self.show, args=()).start()
+        return self
+
+    def show(self):
+        while not self.stopped:
+            pass
+
+    def stop(self):
+        self.stopped = True
+
+
 class CameraStream(QThread):
     frame_processed = pyqtSignal(np.ndarray)
 
@@ -18,13 +66,12 @@ class CameraStream(QThread):
         self.status = None
         self.frame_count = 0
         self.start_time = time.time()
-        self.logger = self.setup_logger()
         self.use_cuda = cv2.cuda.getCudaEnabledDeviceCount() > 0
         self.thread_lock = Lock()
         self.init_video_capture()
         self.width = 640
         self.height = 480
-        self.inter = cv2.INTER_AREA
+        self.inter = cv2.INTER_LANCZOS4
 
     def init_video_capture(self):
         try:
@@ -35,20 +82,6 @@ class CameraStream(QThread):
         except Exception as e:
             print(f"Error initializing video capture: {e}")
             self.status = False
-
-    def setup_logger(self):
-        logger = logging.getLogger("CameraStreamLogger")
-        logger.setLevel(logging.DEBUG)
-        formatter = logging.Formatter(
-            '%(asctime)s - %(levelname)s - %(message)s')
-
-        # Log to console
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.DEBUG)
-        ch.setFormatter(formatter)
-        logger.addHandler(ch)
-
-        return logger
 
     def update(self):
         while True:
@@ -68,27 +101,30 @@ class CameraStream(QThread):
                 process_thread.start()
             else:
                 break
+        time.sleep(0.1)
 
     def process_and_emit_frame(self, frame):
-        try:
-            if not self.use_cuda:
-                dehazing_instance = DehazingCPU()
-                self.frame = dehazing_instance.image_processing(frame)
-            else:
-                dehazing_instance = DehazingCuda()
-                self.frame = dehazing_instance.image_processing(frame)
+        if not self.use_cuda:
+            dehazing_instance = DehazingCPU()
+        else:
+            dehazing_instance = DehazingCuda()
+        self.frame = dehazing_instance.image_processing(frame)
+        with self.thread_lock:
 
-            with self.thread_lock:
-                # Calculate FPS
-                self.frame_count += 1
-                elapsed_time = time.time() - self.start_time
-                fps = self.frame_count / elapsed_time
-                self.logger.debug(f"FPS: {fps}")
+            # Calculate FPS
+            self.frame_count += 1
+            elapsed_time = time.time() - self.start_time
+            fps = self.frame_count / elapsed_time
+            print(f"FPS: {fps}")
 
+            self.emit_frame_thread()
+
+    def emit_frame_thread(self):
+        while True:
+            if self.frame is not None:
                 self.frame_processed.emit(self.frame)
-
-        except Exception as e:
-            self.logger.error(f"Error processing frame: {e}")
+                self.frame = None
+            time.sleep(0.01)
 
     def start(self) -> None:
         self.thread = Thread(target=self.update, args=())
