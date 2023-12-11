@@ -117,14 +117,7 @@ class CameraStream(QThread):
             fps = self.frame_count / elapsed_time
             print(f"FPS: {fps}")
 
-            self.emit_frame_thread()
-
-    def emit_frame_thread(self):
-        while True:
-            if self.frame is not None:
-                self.frame_processed.emit(self.frame)
-                self.frame = None
-            time.sleep(0.01)
+            self.frame_processed.emit(self.frame)
 
     def start(self) -> None:
         self.thread = Thread(target=self.update, args=())
@@ -132,10 +125,11 @@ class CameraStream(QThread):
         self.thread.start()
 
     def stop(self) -> None:
-        if self.capture is not None:
-            self.capture.release()
-        cv2.destroyAllWindows()
-        self.terminate()
+        with self.thread_lock:
+            if self.capture is not None:
+                self.capture.release()
+            cv2.destroyAllWindows()
+            self.terminate()
 
 
 class VideoProcessor(QObject):
