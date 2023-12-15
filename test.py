@@ -39,10 +39,12 @@ class CameraStream(QThread):
         return logger
 
     def update(self):
-
         while True:
             if self.capture.isOpened():
-                self.status, self.img = self.capture.read()
+                # Grab the frame
+                if self.capture.grab():
+                    # Retrieve the frame
+                    self.status, self.img = self.capture.retrieve()
             time.sleep(0.01)  # Adjust this delay as needed
 
     def DarkChannel(self, im, sz):
@@ -144,7 +146,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(self.central_widget)
         layout.addWidget(self.video_label)
 
-        self.stream = CameraStream('http://192.168.1.15:4747/video?1280x720')
+        self.stream = CameraStream('http://192.168.1.5:4747/video?1280x720')
         self.stream.frame_processed.connect(self.display_frame)
 
         self.timer = QTimer(self)

@@ -27,6 +27,9 @@ class CameraStream(QThread):
         self.height = 480
         self.inter = cv2.INTER_AREA
         self.stop_thread = False  # Flag to signal the threads to stop
+        self.threads_count = min(psutil.cpu_count(
+            logical=False), psutil.cpu_count())
+        self.executor = ThreadPoolExecutor(max_workers=self.threads_count)
 
     def init_video_capture(self):
         try:
@@ -63,27 +66,20 @@ class CameraStream(QThread):
         grab_thread = Thread(target=self.grab_frames, args=())
         grab_thread.daemon = True
         grab_thread.start()
-
         while not self.stop_thread:
             try:
                 if self.capture.isOpened():
                     self.status, frame = self.capture.retrieve()
-
                     if self.status:
                         self.img = cv2.resize(
                             frame, (self.width, self.height), self.inter)
-                        # Process the frame in a separate thread
-                        process_thread = Thread(
-                            target=self.process_and_emit_frame, args=(self.img,))
-                        process_thread.daemon = True
-                        process_thread.start()
-
+                        future = self.executor.submit(
+                            self.process_and_emit_frame, self.img)
                     else:
                         self.status = False  # Ensure status is False if the capture is not opened
             except Exception as e:
                 print(f"Error processing frame: {e}")
                 self.status = False  # Set status to False in case of error
-
         grab_thread.join()
 
     def process_and_emit_frame(self, frame):
